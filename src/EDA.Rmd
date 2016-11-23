@@ -1,0 +1,16 @@
+---
+title: "R Notebook"
+output:
+  html_document: default
+  html_notebook: default
+---
+
+Testing EDA notebook
+
+```{r}
+train <- read.csv("../input/train.csv")
+```
+
+```{r}
+str(train)
+```
