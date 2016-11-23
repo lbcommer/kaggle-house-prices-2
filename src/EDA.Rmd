@@ -1,16 +1,253 @@
 ---
-title: "R Notebook"
-output:
-  html_document: default
-  html_notebook: default
+title: "EDA House Prices"
+output: html_document
 ---
 
-Testing EDA notebook
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Summary
+
+This is an EDA for the **kaggle** competition [House Prices: Advanced Regression Techniques](https://www.kaggle.com/c/house-prices-advanced-regression-techniques>). 
+
+
+
+```{r}
+#install.packages("moments")
+
+library(ggplot2) # Data visualization
+library(readr) # CSV file I/O, e.g. the read_csv function
+library(moments)
+library(gridExtra)
+library(caret)
+library(corrplot)
+```
+
+```{r}
+set.seed(1234)
+```
+
+### Loading and preprocessing the data
+
+You can also embed plots, for example:
 
 ```{r}
 train <- read.csv("../input/train.csv")
 ```
 
+These are detected as numeric but they are categorical variables:
+
+```{r}
+train$MSSubClass <- as.factor(train$MSSubClass)
+train$OverallQual <- as.factor(train$OverallQual)
+train$OverallCond <- as.factor(train$OverallCond)
+#train$YearBuilt <- as.factor(train$YearBuilt)
+#train$YearRemodAdd <- as.factor(train$YearRemodAdd)
+```
+
+```{r}
+numeric_var <- names(train)[which(sapply(train, is.numeric))]
+factor_var <- names(train)[!(names(train) %in% numeric_var)]
+```
+
+
+### First look to the data and getting some summary information
+
 ```{r}
 str(train)
 ```
+
+There are `r nrow(train)` data rows and `r ncol(train)` variables 
+
+```{r}
+summary(train)
+```
+
+### Check NA values
+we can see some NA values in variables: 
+
+```{r}
+which(apply(train, 2, function(x) any(is.na(x)))==TRUE)
+all_vars_napercent <- apply(train, 2, function(x) round(sum(is.na(x))/nrow(train), 3))
+naVars <- names(train)[which(apply(train, 2, function(x) round(sum(is.na(x))/nrow(train), 3))>0)]
+sort(all_vars_napercent[naVars], decreasing = TRUE)
+```
+
+Some variables like *PoolQC* , *MiscFeature*, *Alley*, *Fence* has a very hight ratio of NA values. 
+
+We can see that all of the `r nrow(train)` row have one ore more NA values:
+
+```{r}
+sum(apply(train, 1 , function(x) sum(is.na(x))) == 0)
+```
+
+Alternately 
+
+```{r}
+sum(complete.cases(train))
+```
+
+Although only `r mean(is.na(train))*100`% of the values of the data are missing values 
+
+We can check this and get more detailed information using specialized imputation packages like [MICE](https://www.analyticsvidhya.com/blog/2016/03/tutorial-powerful-packages-imputing-missing-values/)
+
+```{r}
+library(VIM)
+mice_plot <- aggr(train, col=c('navyblue','yellow'),
+                    numbers=TRUE, sortVars=TRUE,
+                    labels=names(train), cex.axis=.7,
+                    gap=3, ylab=c("Missing data","Pattern"))
+```
+
+If we want to use some machine learning models like linear regression we will need to impute values for these NA
+
+### Check variables with zero o near zero variance 
+
+Let's see what variables have small or zero variance being very conservative with this:
+```{r}
+vars_variance <- nearZeroVar(train, saveMetrics = TRUE, freqCut = 99/1, uniqueCut = 1)
+vars_variance[vars_variance[,"zeroVar"] + vars_variance[,"nzv"] > 0, ] 
+```
+
+There aren't any variable with zero variance. We will have to examine in detail these variables near zero variance to see if we can eliminate some of them.
+
+### Check outcome variable
+
+The outcome variable to predict is SalePrice. We will take a look to the values of this variable in detail for the training data:
+
+```{r}
+summary(train$SalePrice)
+boxplot(train$SalePrice)
+```
+
+We can see SalePrice is right skewed and don't follow a normal distribution
+
+```{r}
+skewness(train$SalePrice)
+shapiro.test(train$SalePrice)
+qqnorm(train$SalePrice)
+qqline(train$SalePrice, col = 2)
+```
+
+
+We can try to check what happens with a log transformation of SalePrice:
+```{r}
+logSalePrice <- log(train$SalePrice)
+hist(logSalePrice)
+skewness(logSalePrice)
+shapiro.test(logSalePrice)
+qqnorm(logSalePrice)
+qqline(logSalePrice, col = 2)
+```
+
+It looks like it follows a more normal distribution but it has some right skew too, and its not completely normal as shapiro test show: if we consider a 0.05 level of significance we must reject the null hipotesys which consideres the data follows a normal distribution.
+
+Lets take a look to categorical variables
+```{r}
+plotHist <- function(data_in, i) {
+  data <- data.frame(x=data_in[[i]])
+  p <- ggplot(data=data, aes(x=factor(x))) + stat_count() + xlab(colnames(data_in)[i]) + theme_light() + 
+    theme(axis.text.x = element_text(angle = 90, hjust =1))
+  return (p)
+}
+
+doPlots <- function(data_in, fun, ii, ncol=3) {
+  pp <- list()
+  for (i in ii) {
+    p <- fun(data_in=data_in, i=i)
+    pp <- c(pp, list(p))
+  }
+  do.call("grid.arrange", c(pp, ncol=ncol))
+}
+
+
+plotDen <- function(data_in, i){
+  data <- data.frame(x=data_in[[i]], SalePrice = data_in$SalePrice)
+  p <- ggplot(data= data) + geom_line(aes(x = x), stat = 'density', size = 1,alpha = 1.0) +
+    xlab(paste0((colnames(data_in)[i]), '\n', 'Skewness: ',round(skewness(data_in[[i]], na.rm = TRUE), 2))) + theme_light() 
+  return(p)
+   
+}
+
+
+```
+
+```{r}
+doPlots(train[,factor_var], fun = plotHist, ii = 1:4, ncol = 2)
+```
+
+```{r}
+doPlots(train[,factor_var], fun = plotHist, ii  = 5:9, ncol = 2)
+```
+
+```{r}
+doPlots(train[,factor_var], fun = plotHist, ii  = 10:14, ncol = 2)
+```
+
+```{r}
+doPlots(train[,factor_var], fun = plotHist, ii  = 15:20, ncol = 2)
+```
+
+```{r}
+doPlots(train[,factor_var], fun = plotHist, ii  = 21:28, ncol = 2)
+```
+
+```{r}
+doPlots(train[,factor_var], fun = plotHist, ii  = 29:38, ncol = 2)
+```
+
+```{r}
+doPlots(train[,factor_var], fun = plotHist, ii  = 39:46, ncol = 2)
+```
+
+Mostramos las gráficas de densidad para las variables continuas
+
+```{r}
+doPlots(train[,numeric_var], fun = plotDen, ii = 2:9, ncol = 2)
+```
+
+```{r}
+doPlots(train[,numeric_var], fun = plotDen, ii = 10:17, ncol = 2)
+```
+
+```{r}
+doPlots(train[,numeric_var], fun = plotDen, ii = 18:25, ncol = 2)
+```
+
+```{r}
+doPlots(train[,numeric_var], fun = plotDen, ii = 26:35, ncol = 2)
+```
+
+### First Data Cleaning
+
+### Identify correlations
+
+We take a look to the correlation of the numerical variables (we omit the Id variable too):
+
+```{r}
+cont_vars <- numeric_var[2:length(numeric_var)]
+correlations <- cor(na.omit(train[, cont_vars]))
+corrplot(correlations, method="square")
+```
+
+Let's see what variables are more correlated:
+
+```{r}
+high_correlations_index <- apply(correlations, 1, function(x) sum( abs(x) > 0.3 ) > 1) 
+high_correlations <- correlations[high_correlations_index, high_correlations_index]
+corrplot(high_correlations, method="square")
+```
+
+The hight correlated vars are these:
+
+```{r}
+cont_vars[high_correlations_index]
+```
+
+
+### References
++ [Tutorial on 5 Powerful R Packages used for imputing missing values](https://www.analyticsvidhya.com/blog/2016/03/tutorial-powerful-packages-imputing-missing-values/)
++ [Missing Value Treatment](http://r-statistics.co/Missing-Value-Treatment-With-R.html)
++ [Interesting graph functions](https://www.kaggle.com/notaapple/house-prices-advanced-regression-techniques/detailed-exploratory-data-analysis-using-r/notebook)
++ [Better Understand Your Data in R Using Visualization](http://machinelearningmastery.com/data-visualization-in-r/)
